@@ -18,16 +18,6 @@ SimpleCache is a flexible, lightweight, and thread-safe in-memory caching soluti
 - 🔄 Automatic value loading for cache misses
 - 💻 Lightweight and easy to use
 
-## Installation
-
-### Maven Dependency
-```xml
-<dependency>
-    <groupId>org.gaideski</groupId>
-    <artifactId>simple-cache</artifactId>
-    <version>1.0.0</version>
-</dependency>
-```
 
 ## Basic Usage
 
