@@ -152,6 +152,22 @@ public  class SimpleCache<K,V>{
 
     }
 
+    /**
+     * Return the function used to load values to cache.
+     * Can be used associated with {@link SimpleCache#computeIfAbsent(Object, Function)}
+     * @return
+     */
+    public Function<K,V> getLoadingFunction(){
+        return this.loadingFunction;
+    }
+
+    /**
+     * Return the value of the given key or compute the value storing it in the cache.
+     * similar to {@link Map#computeIfAbsent(Object, Function)}
+     * @param key key
+     * @param mappingFunction function to perform calculation and cache hydration
+     * @return value associated with the key
+     */
     public V computeIfAbsent(K key, Function<? super K, ? extends V> mappingFunction){
         // Remove key if expired
         removeIfExpired(key);

@@ -11,7 +11,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -150,9 +149,7 @@ public class SimpleCacheBuilderTest {
 
             for (int i = 0; i < threads.length; i++) {
                 final int index = i;
-                threads[i] = new Thread(() -> {
-                    results[index] = cache.computeIfAbsent("concurrentKey", slowComputation);
-                });
+                threads[i] = new Thread(() -> results[index] = cache.computeIfAbsent("concurrentKey", slowComputation));
                 threads[i].start();
             }
 
