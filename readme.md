@@ -13,59 +13,59 @@ SimpleCache is a flexible, lightweight, and thread-safe in-memory caching soluti
 - 🚀 Thread-safe cache implementation
 - 📦 Configurable maximum capacity
 - ⏰ Expiration strategies:
-    - Expire after creation time
-    - Expire after last access
+  - Expire after creation time
+  - Expire after last access
 - 🔄 Automatic value loading for cache misses
 - 💻 Lightweight and easy to use
-
 
 ## Basic Usage
 
 ### Creating a Simple Cache
 ```java
 // Basic cache with default settings
-SimpleCacheBuilder<String, Integer> builder = new SimpleCacheBuilder<>();
-SimpleCacheBuilder.SimpleCache<String, Integer> cache = builder.build();
+SimpleCache.Builder<String, Integer> builder = SimpleCache.Builder.newBuilder();
+SimpleCache<String, Integer> cache = builder.build();
 
 // Add entries
 cache.put("key1", 42);
 Integer value = cache.get("key1"); // Returns 42
 ```
 
-
 ## Advanced Configuration
 ```java
 // Create a cache with advanced configuration
-SimpleCacheBuilder.SimpleCache<String, User> userCache = 
-    new SimpleCacheBuilder<String, User>()
+SimpleCache<String, User> userCache = 
+    SimpleCache.Builder.<String, User>newBuilder()
         .setMaxCapacity(1000)                           // Limit cache size
         .setExpirationAfterCreation(Duration.ofHours(1)) // Expire after 1 hour
         .setExpirationAfterLastAccess(Duration.ofMinutes(30)) // Or 30 minutes after last access
         .setCleanupFrequency(Duration.ofMinutes(5))     // Run cleanup every 5 minutes
-        .setRetrievalFunctionIfCacheMiss(this::loadUserFromDatabase) // Auto-load missing entries
+        .setRetrievalFunctionWhenCacheMiss(this::loadUserFromDatabase) // Auto-load missing entries
         .build();
 ```
 
-### Cleanup Frequency
-- `setCleanupFrequency(Duration frequency)`:
-    - Set how often the cache should run its cleanup process
-    - Removes expired entries at the specified interval
-    - Helps manage memory and remove stale entries
+### Key Configuration Methods
 
-### Capacity Management
-- `setMaxCapacity(long maxCapacity)`: Set maximum number of entries
-- When cache reaches capacity, oldest entries are removed
+#### Capacity Management
+- `setMaxCapacity(long maxCapacity)`:
+  - Set maximum number of entries in the cache
+  - Throws `IllegalArgumentException` if capacity is less than 1
+  - Default is `Long.MAX_VALUE`
 
-### Expiration Strategies
+#### Expiration Strategies
 - `setExpirationAfterCreation(Duration duration)`:
-    - Entries expire after specified time from creation
+  - Entries expire after specified time from creation
 - `setExpirationAfterLastAccess(Duration duration)`:
-    - Entries expire after specified time since last access
+  - Entries expire after specified time since last access
 
-### Automatic Value Loading
+#### Cleanup and Loading
+- `setCleanupFrequency(Duration frequency)`:
+  - Set how often the cache should run its cleanup process
+  - Default is 1 minute if not specified
+  - Removes expired entries at the specified interval
 - `setRetrievalFunctionWhenCacheMiss(Function<K,V> loadingFunction)`:
-    - Automatically compute values for missing cache entries
-    - Useful for lazy loading from databases or external services
+  - Automatically compute values for missing cache entries
+  - Useful for lazy loading from databases or external services
 
 ## Key Methods
 
@@ -74,6 +74,9 @@ SimpleCacheBuilder.SimpleCache<String, User> userCache =
 - `getOptional(K key)`: Retrieve an optional entry
 - `invalidate(K key)`: Remove a specific entry
 - `invalidateAll()`: Clear entire cache
+- `getSize()`: Get current cache size
+- `getMaxCapacity()`: Get maximum cache capacity
+- `getAvailableCapacity()`: Get remaining cache capacity
 
 ## Performance Considerations
 
@@ -81,14 +84,15 @@ SimpleCacheBuilder.SimpleCache<String, User> userCache =
 - Thread-safe with minimal locking
 - Concurrent access supported
 - Automatic cleanup of expired entries
+- Uses virtual threads for cleanup tasks
 
 ## Example: User Cache with Database Retrieval
 ```java
 public class UserService {
-    private SimpleCacheBuilder.SimpleCache<String, User> userCache;
+    private SimpleCache<String, User> userCache;
 
     public UserService() {
-        userCache = new SimpleCacheBuilder<String, User>()
+        userCache = SimpleCache.Builder.<String, User>newBuilder()
             .setMaxCapacity(1000)
             .setExpirationAfterLastAccess(Duration.ofMinutes(30))
             .setRetrievalFunctionWhenCacheMiss(this::fetchUserFromDatabase)
@@ -111,6 +115,7 @@ public class UserService {
 - Safe for concurrent read and write operations
 - Uses `ConcurrentHashMap` internally
 - Supports multi-threaded environments
+- Utilizes virtual threads for background tasks
 
 ## Limitations
 
@@ -122,10 +127,3 @@ public class UserService {
 
 Contributions are welcome! Please submit pull requests or open issues on the project repository.
 
-## License
-
-[Specify your license here]
-
-## Contact
-
-[Your contact information or project repository]

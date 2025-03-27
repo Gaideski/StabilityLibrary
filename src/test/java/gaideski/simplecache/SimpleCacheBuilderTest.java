@@ -1,6 +1,7 @@
 package gaideski.simplecache;
 
-import org.gaideski.simplecache.SimpleCacheBuilder;
+
+import org.gaideski.simplecache.SimpleCache;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -10,6 +11,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -32,8 +34,7 @@ public class SimpleCacheBuilderTest {
         @Test
         @DisplayName("Should create cache with default max capacity")
         void testDefaultMaxCapacity() {
-            SimpleCacheBuilder<String, Integer> builder = new SimpleCacheBuilder<>();
-            SimpleCacheBuilder.SimpleCache<String, Integer> cache = builder.build();
+            SimpleCache<String, Integer> cache = new SimpleCache.Builder<String, Integer>().build();
 
             assertThat(cache.getMaxCapacity()).isEqualTo(Long.MAX_VALUE);
         }
@@ -41,7 +42,7 @@ public class SimpleCacheBuilderTest {
         @Test
         @DisplayName("Should throw exception for invalid max capacity")
         void testInvalidMaxCapacity() {
-            SimpleCacheBuilder<String, Integer> builder = new SimpleCacheBuilder<>();
+            SimpleCache.Builder<String,String> builder = new SimpleCache.Builder<>();
 
             assertThatThrownBy(() -> builder.setMaxCapacity(0))
                     .isInstanceOf(IllegalArgumentException.class)
@@ -51,26 +52,72 @@ public class SimpleCacheBuilderTest {
         @Test
         @DisplayName("Should set max capacity correctly")
         void testSetMaxCapacity() {
-            SimpleCacheBuilder<String, Integer> builder = new SimpleCacheBuilder<>();
-            SimpleCacheBuilder.SimpleCache<String, Integer> cache = builder
+            SimpleCache<String,Integer> cache =  new SimpleCache.Builder<String, Integer>()
                     .setMaxCapacity(100)
                     .build();
 
             assertThat(cache.getMaxCapacity()).isEqualTo(100);
         }
+
+        @Test
+        void testGetAvailableCapacity() {
+            SimpleCache<String,String> cache =  new SimpleCache.Builder<String, String>()
+                    .setMaxCapacity(100)
+                    .build();
+
+            assertThat(cache.getAvailableCapacity()).isEqualTo(10);
+
+            // Add some entries
+            for (int i = 0; i < 5; i++) {
+                cache.put("key" + i, "value" + i);
+            }
+
+            // Check available capacity
+            assertThat(cache.getAvailableCapacity()).isEqualTo(5);
+        }
+
+        @Test
+        void testComputeIfAbsentWithNewKey() {
+            SimpleCache<String,String> cache =  new SimpleCache.Builder<String, String>()
+                    .setMaxCapacity(100)
+                    .build();
+
+            // Compute a new value
+            String result = cache.computeIfAbsent("newKey", key -> "computedValue");
+
+            // Verify the value is returned and cached
+            assertThat(result).isEqualTo("computedValue");
+            assertThat(cache.get("newKey")).isEqualTo("computedValue");
+        }
+
+        @Test
+        void testComputeIfAbsentExistingKey() {
+            SimpleCache<String,String> cache =  new SimpleCache.Builder<String, String>()
+                    .setMaxCapacity(100)
+                    .build();
+
+            cache.put("existingKey", "originalValue");
+
+            // Compute with existing key should not change the value
+            String result = cache.computeIfAbsent("existingKey", key -> "newValue");
+
+            // Verify the original value is retained
+            assertThat(result).isEqualTo("originalValue");
+        }
+
     }
 
     @Nested
     @DisplayName("SimpleCache Functionality Tests")
     class SimpleCacheTests {
-        private SimpleCacheBuilder.SimpleCache<String, Integer> cache;
+        private SimpleCache<String, Integer> cache;
 
         @Mock
         private Function<String, Integer> mockLoadingFunction;
 
         @BeforeEach
         void setUp() {
-            SimpleCacheBuilder<String, Integer> builder = new SimpleCacheBuilder<>();
+            var builder = new SimpleCache.Builder<String,Integer>();
             cache = builder
                     .setMaxCapacity(2)
                     .setRetrievalFunctionWhenCacheMiss(mockLoadingFunction)
@@ -83,6 +130,44 @@ public class SimpleCacheBuilderTest {
             cache.put("key1", 42);
 
             assertThat(cache.get("key1")).isEqualTo(42);
+        }
+
+        @Test
+        void testComputeIfAbsentConcurrency() throws InterruptedException {
+            // Simulate concurrent access
+            Function<String, Integer> slowComputation = key -> {
+                try {
+                    Thread.sleep(50); // Simulate some computation time
+                    return 101;
+                } catch (InterruptedException e) {
+                    return null;
+                }
+            };
+
+            // Create multiple threads to access the same key
+            Thread[] threads = new Thread[10];
+            Integer[] results = new Integer[threads.length];
+
+            for (int i = 0; i < threads.length; i++) {
+                final int index = i;
+                threads[i] = new Thread(() -> {
+                    results[index] = cache.computeIfAbsent("concurrentKey", slowComputation);
+                });
+                threads[i].start();
+            }
+
+            // Wait for all threads to complete
+            for (Thread thread : threads) {
+                thread.join();
+            }
+
+            // Verify all threads got the same value
+            for (Integer result : results) {
+                assertThat(result).isEqualTo(101);
+            }
+
+            // Verify the computation happened only once
+            assertThat(cache.get("concurrentKey")).isEqualTo(101);
         }
 
         @Test
@@ -140,12 +225,12 @@ public class SimpleCacheBuilderTest {
     @Nested
     @DisplayName("Capacity and Expiration Tests")
     class CapacityAndExpirationTests {
-        private SimpleCacheBuilder.SimpleCache<String, Integer> cache;
+        private SimpleCache<String, Integer> cache;
 
         @Test
         @DisplayName("Should remove oldest entry when cache is full")
         void testCacheCapacity() throws InterruptedException {
-            SimpleCacheBuilder<String, Integer> builder = new SimpleCacheBuilder<>();
+            var builder = new SimpleCache.Builder<String,Integer>();
             cache = builder.setMaxCapacity(2).build();
 
             cache.put("key1", 42);
@@ -162,7 +247,7 @@ public class SimpleCacheBuilderTest {
         @Test
         @DisplayName("Should expire entries after creation time")
         void testExpireAfterCreation() throws InterruptedException {
-            SimpleCacheBuilder<String, Integer> builder = new SimpleCacheBuilder<>();
+            var builder = new SimpleCache.Builder<String,Integer>();
             cache = builder
                     .setMaxCapacity(2)
                     .setExpirationAfterCreation(Duration.ofMillis(50))
@@ -179,7 +264,7 @@ public class SimpleCacheBuilderTest {
         @Test
         @DisplayName("Should expire entries after last access")
         void testExpireAfterLastAccess() throws InterruptedException {
-            SimpleCacheBuilder<String, Integer> builder = new SimpleCacheBuilder<>();
+            var builder = new SimpleCache.Builder<String,Integer>();
             cache = builder
                     .setMaxCapacity(2)
                     .setExpirationAfterLastAccess(Duration.ofMillis(50))
@@ -222,8 +307,8 @@ public class SimpleCacheBuilderTest {
             };
 
             // Create a cache with expiration and capacity limit
-            SimpleCacheBuilder<String, Integer> builder = new SimpleCacheBuilder<>();
-            SimpleCacheBuilder.SimpleCache<String, Integer> cache = builder
+            var builder = new SimpleCache.Builder<String,Integer>();
+            SimpleCache<String, Integer> cache = builder
                     .setMaxCapacity(totalEntries)
                     .setExpirationAfterCreation(expiration)
                     .setCleanupFrequency(Duration.ofMillis(199))
@@ -264,7 +349,7 @@ public class SimpleCacheBuilderTest {
                         String key = "item" + j;
 
                         // This will trigger computeIfAbsent since entries have expired
-                        Integer value = cache.get(key);
+                        cache.get(key);
                     }
                 }));
             }
