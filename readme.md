@@ -7,6 +7,7 @@ SimpleCache is a flexible, lightweight, and thread-safe in-memory caching soluti
 - Time-based expiration
 - Automatic value loading
 - Concurrent access
+- Secondary indexing for efficient lookups
 
 ## Features
 
@@ -16,6 +17,7 @@ SimpleCache is a flexible, lightweight, and thread-safe in-memory caching soluti
   - Expire after creation time
   - Expire after last access
 - 🔄 Automatic value loading for cache misses
+- 🔍 Secondary indexes for property-based lookups
 - 💻 Lightweight and easy to use
 
 ## Basic Usage
@@ -41,8 +43,65 @@ SimpleCache<String, User> userCache =
         .setExpirationAfterLastAccess(Duration.ofMinutes(30)) // Or 30 minutes after last access
         .setCleanupFrequency(Duration.ofMinutes(5))     // Run cleanup every 5 minutes
         .setRetrievalFunctionWhenCacheMiss(this::loadUserFromDatabase) // Auto-load missing entries
+        .addSecondaryIndex("emailIndex", User::getEmail) // Create an index on email property
         .build();
+
+// Find a user by email using the secondary index
+List<User> usersWithEmail = userCache.findByIndex("emailIndex", "john@example.com");
 ```
+
+### Secondary Indexing
+
+SimpleCache now supports secondary indexes for efficient lookups by value properties:
+
+```java
+// Create a session cache with a secondary index on userId
+SimpleCache<String, UserSession> sessionCache = 
+    new SimpleCache
+        .Builder<String, UserSession>()
+        .setCleanupFrequency(Duration.ofSeconds(10))
+        .setMaxCapacity(config.maxSessions())
+        .setExpirationAfterLastAccess(config.getSessionTimeToLive())
+        .addSecondaryIndex("USER_INDEX", UserSession::getUserId)
+        .build();
+
+// Find all sessions for a specific user
+List<UserSession> userSessions = sessionCache.findByIndex("USER_INDEX", "user123");
+```
+
+You can also add secondary indexes after cache creation:
+
+```java
+// Create a secondary index on user age
+userCache.createSecondaryIndex("ageIndex", User::getAge);
+
+// Find all users with age 30
+List<User> thirtyYearOlds = userCache.findByIndex("ageIndex", 30);
+```
+
+### Secondary Index Methods
+
+- `addSecondaryIndex(String indexName, Function<V, Object> propertyExtractor)`:
+  - Add a secondary index during cache construction
+  - Specify a name for the index and a function to extract the indexed property
+
+- `createSecondaryIndex(String indexName, Function<V, Object> propertyExtractor)`:
+  - Create a secondary index on an existing cache
+  - All existing entries will be indexed
+
+- `findByIndex(String indexName, Object propertyValue)`:
+  - Find all values matching the specified property value
+  - Returns a list of values
+
+- `findByPredicate(Predicate<V> predicate)`:
+  - Find all values matching a custom predicate
+  - Useful for complex search criteria
+
+- `hasIndex(String indexName)`:
+  - Check if a secondary index exists
+
+- `getIndexNames()`:
+  - Get a list of all secondary index names
 
 ### Key Configuration Methods
 
@@ -84,28 +143,73 @@ SimpleCache<String, User> userCache =
 - Thread-safe with minimal locking
 - Concurrent access supported
 - Automatic cleanup of expired entries
-- Uses virtual threads for cleanup tasks
+- Secondary indexes for efficient property-based lookups
 
-## Example: User Cache with Database Retrieval
+## Example: User Cache with Secondary Index
 ```java
 public class UserService {
     private SimpleCache<String, User> userCache;
-
+    
     public UserService() {
         userCache = SimpleCache.Builder.<String, User>newBuilder()
             .setMaxCapacity(1000)
             .setExpirationAfterLastAccess(Duration.ofMinutes(30))
             .setRetrievalFunctionWhenCacheMiss(this::fetchUserFromDatabase)
+            .addSecondaryIndex("emailIndex", User::getEmail)
+            .addSecondaryIndex("ageIndex", User::getAge)
             .build();
     }
-
+    
     private User fetchUserFromDatabase(String userId) {
         // Implement database lookup
         return database.findUserById(userId);
     }
-
+    
     public User getUser(String userId) {
         return userCache.get(userId);
+    }
+    
+    public List<User> getUsersByEmail(String email) {
+        return userCache.findByIndex("emailIndex", email);
+    }
+    
+    public List<User> getUsersByAge(int age) {
+        return userCache.findByIndex("ageIndex", age);
+    }
+    
+    public List<User> getUsersOlderThan(int age) {
+        return userCache.findByPredicate(user -> user.getAge() > age);
+    }
+}
+```
+
+## Session Management Example
+```java
+public class SessionManager {
+    private static final String USER_INDEX = "userIndex";
+    private SimpleCache<String, UserSession> sessionCache;
+    
+    public SessionManager(SessionConfig config) {
+        sessionCache = new SimpleCache
+            .Builder<String, UserSession>()
+            .setCleanupFrequency(Duration.ofSeconds(10))
+            .setMaxCapacity(config.maxSessions())
+            .setExpirationAfterLastAccess(config.getSessionTimeToLive())
+            .addSecondaryIndex(USER_INDEX, UserSession::getUserId)
+            .build();
+    }
+    
+    public UserSession getSession(String sessionId) {
+        return sessionCache.get(sessionId);
+    }
+    
+    public List<UserSession> getSessionsForUser(String userId) {
+        return sessionCache.findByIndex(USER_INDEX, userId);
+    }
+    
+    public void invalidateUserSessions(String userId) {
+        List<UserSession> userSessions = sessionCache.findByIndex(USER_INDEX, userId);
+        userSessions.forEach(session -> sessionCache.invalidate(session.getSessionId()));
     }
 }
 ```
@@ -115,15 +219,15 @@ public class UserService {
 - Safe for concurrent read and write operations
 - Uses `ConcurrentHashMap` internally
 - Supports multi-threaded environments
-- Utilizes virtual threads for background tasks
+- Secondary indexes are maintained atomically with cache updates
 
 ## Limitations
 
 - In-memory cache (not distributed)
 - Entire cache content stored in memory
 - Not suitable for very large datasets
+- Secondary indexes increase memory usage
 
 ## Contributing
 
 Contributions are welcome! Please submit pull requests or open issues on the project repository.
-

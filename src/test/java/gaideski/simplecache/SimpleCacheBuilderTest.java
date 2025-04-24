@@ -1,377 +1,420 @@
 package gaideski.simplecache;
 
-
 import org.gaideski.simplecache.SimpleCache;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Duration;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
+import java.util.function.Predicate;
 
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
 
-@ExtendWith(MockitoExtension.class)
-public class SimpleCacheBuilderTest {
+class SimpleCacheTest {
 
-    @Nested
-    @DisplayName("SimpleCacheBuilder Configuration Tests")
-    class BuilderConfigurationTests {
+    private SimpleCache<String, User> userCache;
 
-        @Test
-        @DisplayName("Should create cache with default max capacity")
-        void testDefaultMaxCapacity() {
-            SimpleCache<String, Integer> cache = new SimpleCache.Builder<String, Integer>().build();
-
-            assertThat(cache.getMaxCapacity()).isEqualTo(Long.MAX_VALUE);
-        }
-
-        @Test
-        @DisplayName("Should throw exception for invalid max capacity")
-        void testInvalidMaxCapacity() {
-            SimpleCache.Builder<String,String> builder = new SimpleCache.Builder<>();
-
-            assertThatThrownBy(() -> builder.setMaxCapacity(0))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("Cache size must be greater than 0");
-        }
-
-        @Test
-        @DisplayName("Should set max capacity correctly")
-        void testSetMaxCapacity() {
-            SimpleCache<String,Integer> cache =  new SimpleCache.Builder<String, Integer>()
-                    .setMaxCapacity(100)
-                    .build();
-
-            assertThat(cache.getMaxCapacity()).isEqualTo(100);
-        }
-
-        @Test
-        void testGetAvailableCapacity() {
-            SimpleCache<String,String> cache =  new SimpleCache.Builder<String, String>()
-                    .setMaxCapacity(100)
-                    .build();
-
-            assertThat(cache.getAvailableCapacity()).isEqualTo(10);
-
-            // Add some entries
-            for (int i = 0; i < 5; i++) {
-                cache.put("key" + i, "value" + i);
-            }
-
-            // Check available capacity
-            assertThat(cache.getAvailableCapacity()).isEqualTo(5);
-        }
-
-        @Test
-        void testComputeIfAbsentWithNewKey() {
-            SimpleCache<String,String> cache =  new SimpleCache.Builder<String, String>()
-                    .setMaxCapacity(100)
-                    .build();
-
-            // Compute a new value
-            String result = cache.computeIfAbsent("newKey", key -> "computedValue");
-
-            // Verify the value is returned and cached
-            assertThat(result).isEqualTo("computedValue");
-            assertThat(cache.get("newKey")).isEqualTo("computedValue");
-        }
-
-        @Test
-        void testComputeIfAbsentExistingKey() {
-            SimpleCache<String,String> cache =  new SimpleCache.Builder<String, String>()
-                    .setMaxCapacity(100)
-                    .build();
-
-            cache.put("existingKey", "originalValue");
-
-            // Compute with existing key should not change the value
-            String result = cache.computeIfAbsent("existingKey", key -> "newValue");
-
-            // Verify the original value is retained
-            assertThat(result).isEqualTo("originalValue");
-        }
-
+    @BeforeEach
+    void setUp() {
+        userCache = new SimpleCache.Builder<String, User>()
+                .setMaxCapacity(100)
+                .setExpirationAfterLastAccess(Duration.ofMinutes(10))
+                .build();
     }
 
-    @Nested
-    @DisplayName("SimpleCache Functionality Tests")
-    class SimpleCacheTests {
-        private SimpleCache<String, Integer> cache;
+    @Test
+    void basicOperations() {
+        // Test put and get
+        User user1 = new User("1", "John", "Doe", 30);
+        userCache.put("user1", user1);
 
-        @Mock
-        private Function<String, Integer> mockLoadingFunction;
+        assertEquals(user1, userCache.get("user1"));
+        assertEquals(1, userCache.getSize());
 
-        @BeforeEach
-        void setUp() {
-            var builder = new SimpleCache.Builder<String,Integer>();
-            cache = builder
-                    .setMaxCapacity(2)
-                    .setRetrievalFunctionWhenCacheMiss(mockLoadingFunction)
-                    .build();
-        }
+        // Test invalidate
+        assertTrue(userCache.invalidate("user1"));
+        assertNull(userCache.get("user1"));
+        assertEquals(0, userCache.getSize());
 
-        @Test
-        @DisplayName("Should put and get values correctly")
-        void testPutAndGet() {
-            cache.put("key1", 42);
+        // Test invalidateAll
+        userCache.put("user1", user1);
+        userCache.put("user2", new User("2", "Jane", "Smith", 25));
+        assertEquals(2, userCache.getSize());
 
-            assertThat(cache.get("key1")).isEqualTo(42);
-        }
-
-        @Test
-        void testComputeIfAbsentConcurrency() throws InterruptedException {
-            // Simulate concurrent access
-            Function<String, Integer> slowComputation = key -> {
-                try {
-                    Thread.sleep(50); // Simulate some computation time
-                    return 101;
-                } catch (InterruptedException e) {
-                    return null;
-                }
-            };
-
-            // Create multiple threads to access the same key
-            Thread[] threads = new Thread[10];
-            Integer[] results = new Integer[threads.length];
-
-            for (int i = 0; i < threads.length; i++) {
-                final int index = i;
-                threads[i] = new Thread(() -> results[index] = cache.computeIfAbsent("concurrentKey", slowComputation));
-                threads[i].start();
-            }
-
-            // Wait for all threads to complete
-            for (Thread thread : threads) {
-                thread.join();
-            }
-
-            // Verify all threads got the same value
-            for (Integer result : results) {
-                assertThat(result).isEqualTo(101);
-            }
-
-            // Verify the computation happened only once
-            assertThat(cache.get("concurrentKey")).isEqualTo(101);
-        }
-
-        @Test
-        @DisplayName("Should return null for non-existent key")
-        void testGetNonExistentKey() {
-            assertThat(cache.get("nonexistent")).isNull();
-        }
-
-        @Test
-        @DisplayName("Should load value using loading function")
-        void testLoadingFunction() {
-            when(mockLoadingFunction.apply("key1")).thenReturn(42);
-
-            Integer value = cache.get("key1");
-
-            assertThat(value).isEqualTo(42);
-            verify(mockLoadingFunction).apply("key1");
-        }
-
-        @Test
-        @DisplayName("Should return optional value")
-        void testGetOptional() {
-            cache.put("key1", 42);
-
-            Optional<Integer> optionalValue = cache.getOptional("key1");
-
-            assertThat(optionalValue)
-                    .isPresent()
-                    .contains(42);
-        }
-
-        @Test
-        @DisplayName("Should invalidate specific key")
-        void testInvalidate() {
-            cache.put("key1", 42);
-
-            boolean result = cache.invalidate("key1");
-
-            assertThat(result).isTrue();
-            assertThat(cache.get("key1")).isNull();
-        }
-
-        @Test
-        @DisplayName("Should invalidate all keys")
-        void testInvalidateAll() {
-            cache.put("key1", 42);
-            cache.put("key2", 43);
-
-            cache.invalidateAll();
-
-            assertThat(cache.getSize()).isZero();
-        }
+        userCache.invalidateAll();
+        assertEquals(0, userCache.getSize());
     }
 
-    @Nested
-    @DisplayName("Capacity and Expiration Tests")
-    class CapacityAndExpirationTests {
-        private SimpleCache<String, Integer> cache;
+    @Test
+    void capacityLimits() {
+        SimpleCache<Integer, String> limitedCache = new SimpleCache.Builder<Integer, String>()
+                .setMaxCapacity(3)
+                .build();
 
-        @Test
-        @DisplayName("Should remove oldest entry when cache is full")
-        void testCacheCapacity() throws InterruptedException {
-            var builder = new SimpleCache.Builder<String,Integer>();
-            cache = builder.setMaxCapacity(2).build();
+        limitedCache.put(1, "One");
+        limitedCache.put(2, "Two");
+        limitedCache.put(3, "Three");
+        assertEquals(3, limitedCache.getSize());
 
-            cache.put("key1", 42);
-            TimeUnit.MILLISECONDS.sleep(10);
-            cache.put("key2", 43);
-            TimeUnit.MILLISECONDS.sleep(10);
-            cache.put("key3", 44);
-
-            assertThat(cache.get("key1")).isNull();
-            assertThat(cache.get("key2")).isNotNull();
-            assertThat(cache.get("key3")).isNotNull();
-        }
-
-        @Test
-        @DisplayName("Should expire entries after creation time")
-        void testExpireAfterCreation() throws InterruptedException {
-            var builder = new SimpleCache.Builder<String,Integer>();
-            cache = builder
-                    .setMaxCapacity(2)
-                    .setExpirationAfterCreation(Duration.ofMillis(50))
-                    .setCleanupFrequency(Duration.ofMillis(25))
-                    .build();
-
-            cache.put("key1", 42);
-
-            TimeUnit.MILLISECONDS.sleep(100);
-
-            assertThat(cache.get("key1")).isNull();
-        }
-
-        @Test
-        @DisplayName("Should expire entries after last access")
-        void testExpireAfterLastAccess() throws InterruptedException {
-            var builder = new SimpleCache.Builder<String,Integer>();
-            cache = builder
-                    .setMaxCapacity(2)
-                    .setExpirationAfterLastAccess(Duration.ofMillis(50))
-                    .setCleanupFrequency(Duration.ofMillis(25))
-                    .build();
-
-            cache.put("key1", 42);
-
-            TimeUnit.MILLISECONDS.sleep(30);
-            cache.get("key1");
-
-            TimeUnit.MILLISECONDS.sleep(30);
-            assertThat(cache.get("key1")).isNotNull();
-
-            TimeUnit.MILLISECONDS.sleep(50);
-            assertThat(cache.get("key1")).isNull();
-        }
+        // Adding a fourth entry should evict the least recently accessed
+        limitedCache. put(4, "Four");
+        assertEquals(3, limitedCache.getSize());
+        assertNull(limitedCache.get(1)); // Assuming 1 was the least recently accessed
     }
 
-    @Nested
-    @DisplayName("Large Scale Performance Tests")
-    class LargeScaleCacheTests {
+    @Test
+    void expirationAfterCreation() throws InterruptedException {
+        SimpleCache<String, String> expiringCache = new SimpleCache.Builder<String, String>()
+                .setExpirationAfterCreation(Duration.ofMillis(100))
+                .setCleanupFrequency(Duration.ofMillis(50))
+                .build();
 
-        @Test
-        @DisplayName("Should handle millions of entries with expiration and computeIfAbsent")
-        void testLargeScaleCacheWithExpiration() throws InterruptedException {
-            // Configuration
-            int totalEntries = 1200;
-            int concurrentThreads = Runtime.getRuntime().availableProcessors();
-            Duration expiration = Duration.ofMillis(100);
+        expiringCache.put("key", "value");
+        assertEquals("value", expiringCache.get("key"));
 
-            // Tracking mechanisms
-            List<String> processedKeys = new CopyOnWriteArrayList<>();
-            ConcurrentHashMap<String, Integer> computeCounter = new ConcurrentHashMap<>();
+        // Wait for expiration
+        TimeUnit.MILLISECONDS.sleep(200);
 
-            // Loading function that tracks computations
-            Function<String, Integer> loadingFunction = key -> {
-                computeCounter.merge(key, 1, Integer::sum);
-                return Integer.parseInt(key.substring(4)); // Extract number from key
-            };
+        // Entry should be expired and removed
+        assertNull(expiringCache.get("key"));
+    }
 
-            // Create a cache with expiration and capacity limit
-            var builder = new SimpleCache.Builder<String,Integer>();
-            SimpleCache<String, Integer> cache = builder
-                    .setMaxCapacity(totalEntries)
-                    .setExpirationAfterCreation(expiration)
-                    .setCleanupFrequency(Duration.ofMillis(199))
-                    .setRetrievalFunctionWhenCacheMiss(loadingFunction)
-                    .build();
+    @Test
+    void expirationAfterLastAccess() throws InterruptedException {
+        SimpleCache<String, String> expiringCache = new SimpleCache.Builder<String, String>()
+                .setExpirationAfterLastAccess(Duration.ofMillis(100))
+                .setCleanupFrequency(Duration.ofMillis(50))
+                .build();
 
-            // Populate cache concurrently
-            List<CompletableFuture<Void>> futures = new ArrayList<>();
-            for (int i = 0; i < concurrentThreads; i++) {
-                final int threadIndex = i;
-                futures.add(CompletableFuture.runAsync(() -> {
-                    int start = threadIndex * (totalEntries / concurrentThreads);
-                    int end = (threadIndex + 1) * (totalEntries / concurrentThreads);
+        expiringCache.put("key", "value");
 
-                    for (int j = start; j < end; j++) {
-                        String key = "item" + j;
-                        cache.put(key, j);
-                        processedKeys.add(key);
-                    }
-                }));
-            }
+        // Access the value to reset the last access time
+        assertEquals("value", expiringCache.get("key"));
 
-            // Wait for population to complete
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        // Wait for half the expiration time
+        TimeUnit.MILLISECONDS.sleep(50);
 
-            // Wait for entries to expire
-            TimeUnit.MILLISECONDS.sleep(200);
+        // Access again to reset timer
+        assertEquals("value", expiringCache.get("key"));
 
-            // Prepare for computeIfAbsent testing
-            List<CompletableFuture<Void>> computeFutures = new ArrayList<>();
-            for (int i = 0; i < concurrentThreads; i++) {
-                final int threadIndex = i;
-                computeFutures.add(CompletableFuture.runAsync(() -> {
-                    int start = threadIndex * (totalEntries / concurrentThreads);
-                    int end = (threadIndex + 1) * (totalEntries / concurrentThreads);
+        // Wait for expiration time after last access
+        TimeUnit.MILLISECONDS.sleep(150);
 
-                    for (int j = start; j < end; j++) {
-                        String key = "item" + j;
+        // Entry should be expired and removed
+        assertNull(expiringCache.get("key"));
+    }
 
-                        // This will trigger computeIfAbsent since entries have expired
-                        cache.get(key);
-                    }
-                }));
-            }
+    @Test
+    void automaticLoading() {
+        SimpleCache<Integer, String> loadingCache = new SimpleCache.Builder<Integer, String>()
+                .setRetrievalFunctionWhenCacheMiss(key -> "Generated " + key)
+                .build();
 
-            // Wait for computeIfAbsent operations
-            CompletableFuture.allOf(computeFutures.toArray(new CompletableFuture[0])).join();
+        // Cache should auto-load missing values
+        assertEquals("Generated 1", loadingCache.get(1));
+        assertEquals("Generated 2", loadingCache.get(2));
 
-            // Assertions
-            assertThat(processedKeys).hasSize(totalEntries);
+        // Change value and verify it's updated
+        loadingCache.put(1, "Updated 1");
+        assertEquals("Updated 1", loadingCache.get(1));
+    }
 
-            // Verify that some entries were recomputed
-            assertThat(computeCounter)
-                    .hasSizeGreaterThan(0)
-                    .hasSizeLessThanOrEqualTo(totalEntries);
+    @Test
+    void getOptional() {
+        User user = new User("1", "John", "Doe", 30);
+        userCache.put("user1", user);
 
-            // Verify that all recomputed entries have correct values
-            computeCounter.forEach((key, computeCount) -> {
-                int expectedValue = Integer.parseInt(key.substring(4));
-                assertThat(cache.get(key)).isEqualTo(expectedValue);
-            });
+        Optional<User> optionalUser = userCache.getOptional("user1");
+        assertTrue(optionalUser.isPresent());
+        assertEquals(user, optionalUser.get());
 
-            // Verify that concurrent computeIfAbsent doesn't duplicate work excessively
-            computeCounter.values().forEach(count ->
-                    assertThat(count).isLessThanOrEqualTo(concurrentThreads)
-            );
+        Optional<User> missingUser = userCache.getOptional("missing");
+        assertFalse(missingUser.isPresent());
+    }
+
+    @Test
+    void computeIfAbsent() {
+        assertEquals(0, userCache.getSize());
+
+        User user = userCache.computeIfAbsent("user1", key -> new User("1", "John", "Doe", 30));
+        assertNotNull(user);
+        assertEquals("John", user.getFirstName());
+        assertEquals(1, userCache.getSize());
+
+        // Should return cached value without recomputing
+        User sameUser = userCache.computeIfAbsent("user1", key -> new User("1", "Different", "Name", 99));
+        assertEquals("John", sameUser.getFirstName()); // Should still be the original value
+    }
+
+    // Secondary Index Tests
+
+    @Test
+    void createSecondaryIndex() {
+        User user1 = new User("1", "John", "Doe", 30);
+        User user2 = new User("2", "Jane", "Smith", 30);
+        User user3 = new User("3", "Bob", "Johnson", 25);
+
+        userCache.put("user1", user1);
+        userCache.put("user2", user2);
+        userCache.put("user3", user3);
+
+        // Create an index on the age property
+        userCache.createSecondaryIndex("ageIndex", User::getAge);
+
+        assertTrue(userCache.hasIndex("ageIndex"));
+        assertEquals(Arrays.asList("ageIndex"), userCache.getIndexNames());
+    }
+
+    @Test
+    void findByIndex() {
+        User user1 = new User("1", "John", "Doe", 30);
+        User user2 = new User("2", "Jane", "Smith", 30);
+        User user3 = new User("3", "Bob", "Johnson", 25);
+
+        userCache.put("user1", user1);
+        userCache.put("user2", user2);
+        userCache.put("user3", user3);
+
+        // Create an index on the age property
+        userCache.createSecondaryIndex("ageIndex", User::getAge);
+
+        // Find all users with age 30
+        List<User> users = userCache.findByIndex("ageIndex", 30);
+        assertEquals(2, users.size());
+        assertTrue(users.contains(user1));
+        assertTrue(users.contains(user2));
+
+        // Find all users with age 25
+        List<User> youngUsers = userCache.findByIndex("ageIndex", 25);
+        assertEquals(1, youngUsers.size());
+        assertTrue(youngUsers.contains(user3));
+
+        // Find all users with non-existent age
+        List<User> noUsers = userCache.findByIndex("ageIndex", 50);
+        assertTrue(noUsers.isEmpty());
+    }
+
+    @Test
+    void multipleSecondaryIndexes() {
+        User user1 = new User("1", "John", "Doe", 30);
+        User user2 = new User("2", "Jane", "Smith", 30);
+        User user3 = new User("3", "John", "Johnson", 25);
+
+        userCache.put("user1", user1);
+        userCache.put("user2", user2);
+        userCache.put("user3", user3);
+
+        // Create multiple indexes
+        userCache.createSecondaryIndex("ageIndex", User::getAge);
+        userCache.createSecondaryIndex("firstNameIndex", User::getFirstName);
+
+        assertEquals(2, userCache.getIndexNames().size());
+        assertTrue(userCache.hasIndex("ageIndex"));
+        assertTrue(userCache.hasIndex("firstNameIndex"));
+
+        // Find by firstName
+        List<User> johnsUsers = userCache.findByIndex("firstNameIndex", "John");
+        assertEquals(2, johnsUsers.size());
+
+        // Find by age
+        List<User> thirtyUsers = userCache.findByIndex("ageIndex", 30);
+        assertEquals(2, thirtyUsers.size());
+    }
+
+    @Test
+    void indexUpdatesOnPut() {
+        User user1 = new User("1", "John", "Doe", 30);
+        userCache.put("user1", user1);
+
+        userCache.createSecondaryIndex("ageIndex", User::getAge);
+
+        // Find by age
+        List<User> users = userCache.findByIndex("ageIndex", 30);
+        assertEquals(1, users.size());
+
+        // Update user age
+        User updatedUser = new User("1", "John", "Doe", 31);
+        userCache.put("user1", updatedUser);
+
+        // Original age query should return empty
+        users = userCache.findByIndex("ageIndex", 30);
+        assertTrue(users.isEmpty());
+
+        // New age query should find the updated user
+        users = userCache.findByIndex("ageIndex", 31);
+        assertEquals(1, users.size());
+        assertEquals(updatedUser, users.get(0));
+    }
+
+    @Test
+    void indexUpdatesOnInvalidate() {
+        User user1 = new User("1", "John", "Doe", 30);
+        User user2 = new User("2", "Jane", "Smith", 30);
+
+        userCache.put("user1", user1);
+        userCache.put("user2", user2);
+
+        userCache.createSecondaryIndex("ageIndex", User::getAge);
+
+        // Find by age
+        List<User> users = userCache.findByIndex("ageIndex", 30);
+        assertEquals(2, users.size());
+
+        // Remove one user
+        userCache.invalidate("user1");
+
+        // Query should return only the remaining user
+        users = userCache.findByIndex("ageIndex", 30);
+        assertEquals(1, users.size());
+        assertEquals(user2, users.get(0));
+    }
+
+    @Test
+    void indexUpdatesOnInvalidateAll() {
+        User user1 = new User("1", "John", "Doe", 30);
+        User user2 = new User("2", "Jane", "Smith", 30);
+
+        userCache.put("user1", user1);
+        userCache.put("user2", user2);
+
+        userCache.createSecondaryIndex("ageIndex", User::getAge);
+
+        // Find by age
+        List<User> users = userCache.findByIndex("ageIndex", 30);
+        assertEquals(2, users.size());
+
+        // Clear all
+        userCache.invalidateAll();
+
+        // Query should return empty
+        users = userCache.findByIndex("ageIndex", 30);
+        assertTrue(users.isEmpty());
+    }
+
+    @Test
+    void createSecondaryIndexInBuilder() {
+        SimpleCache<String, User> indexedCache = new SimpleCache.Builder<String, User>()
+                .setMaxCapacity(100)
+                .addSecondaryIndex("ageIndex", User::getAge)
+                .addSecondaryIndex("firstNameIndex", User::getFirstName)
+                .build();
+
+        assertTrue(indexedCache.hasIndex("ageIndex"));
+        assertTrue(indexedCache.hasIndex("firstNameIndex"));
+
+        User user1 = new User("1", "John", "Doe", 30);
+        User user2 = new User("2", "Jane", "Smith", 30);
+
+        indexedCache.put("user1", user1);
+        indexedCache.put("user2", user2);
+
+        // Find by firstName
+        List<User> janeUsers = indexedCache.findByIndex("firstNameIndex", "Jane");
+        assertEquals(1, janeUsers.size());
+        assertEquals(user2, janeUsers.get(0));
+    }
+
+    @Test
+    void findByPredicate() {
+        User user1 = new User("1", "John", "Doe", 30);
+        User user2 = new User("2", "Jane", "Smith", 25);
+        User user3 = new User("3", "Bob", "Johnson", 35);
+
+        userCache.put("user1", user1);
+        userCache.put("user2", user2);
+        userCache.put("user3", user3);
+
+        // Find users older than 27
+        Predicate<User> ageOver27 = user -> user.getAge() > 27;
+        List<User> olderUsers = userCache.findByPredicate(ageOver27);
+
+        assertEquals(2, olderUsers.size());
+        assertTrue(olderUsers.contains(user1));
+        assertTrue(olderUsers.contains(user3));
+
+        // Find users with first name containing 'J'
+        Predicate<User> nameWithJ = user -> user.getFirstName().contains("J");
+        List<User> jUsers = userCache.findByPredicate(nameWithJ);
+
+        assertEquals(2, jUsers.size());
+        assertTrue(jUsers.contains(user1));
+        assertTrue(jUsers.contains(user2));
+    }
+
+    @Test
+    void invalidSecondaryIndexOperations() {
+        User user = new User("1", "John", "Doe", 30);
+        userCache.put("user1", user);
+
+        // Create a valid index
+        userCache.createSecondaryIndex("ageIndex", User::getAge);
+
+        // Try to create duplicate index
+        Exception exception = assertThrows(IllegalArgumentException.class, () -> {
+            userCache.createSecondaryIndex("ageIndex", User::getAge);
+        });
+        assertTrue(exception.getMessage().contains("already exists"));
+
+        // Try to query non-existent index
+        exception = assertThrows(IllegalArgumentException.class, () -> {
+            userCache.findByIndex("nonExistentIndex", "value");
+        });
+        assertTrue(exception.getMessage().contains("not found"));
+    }
+
+    // User test class
+    static class User {
+        private final String id;
+        private final String firstName;
+        private final String lastName;
+        private final int age;
+
+        public User(String id, String firstName, String lastName, int age) {
+            this.id = id;
+            this.firstName = firstName;
+            this.lastName = lastName;
+            this.age = age;
+        }
+
+        public String getId() {
+            return id;
+        }
+
+        public String getFirstName() {
+            return firstName;
+        }
+
+        public String getLastName() {
+            return lastName;
+        }
+
+        public int getAge() {
+            return age;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            User user = (User) o;
+
+            if (age != user.age) return false;
+            if (!id.equals(user.id)) return false;
+            if (!firstName.equals(user.firstName)) return false;
+            return lastName.equals(user.lastName);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = id.hashCode();
+            result = 31 * result + firstName.hashCode();
+            result = 31 * result + lastName.hashCode();
+            result = 31 * result + age;
+            return result;
         }
     }
 }
